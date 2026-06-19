@@ -1,0 +1,205 @@
+.shell {
+  padding: 18px;
+  background: #f6f8fb;
+  min-height: calc(100vh - 48px);
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.eyebrow {
+  color: #5d6b82;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.title {
+  color: #172033;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 2px 0 0;
+}
+
+.subtitle {
+  color: #516071;
+  margin: 4px 0 0;
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.statCard,
+.panel,
+.patientRow,
+.scoreCard,
+.observationRow {
+  background: #ffffff;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+}
+
+.statCard {
+  padding: 14px;
+}
+
+.statLabel {
+  color: #687789;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.statValue {
+  color: #172033;
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1.15;
+  margin-top: 6px;
+}
+
+.panel {
+  padding: 14px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.patientList {
+  display: grid;
+  gap: 8px;
+}
+
+.patientRow {
+  align-items: center;
+  color: inherit;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(120px, 0.65fr)) 36px;
+  padding: 12px;
+  text-decoration: none;
+}
+
+.patientRow:hover {
+  border-color: #8eb4d9;
+  box-shadow: 0 4px 14px rgba(31, 68, 105, 0.08);
+}
+
+.patientName {
+  color: #172033;
+  font-weight: 700;
+}
+
+.muted {
+  color: #657386;
+}
+
+.metric {
+  color: #27364a;
+  font-weight: 700;
+}
+
+.scoreGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.scoreCard {
+  padding: 14px;
+}
+
+.scoreHeader {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scoreValue {
+  color: #172033;
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 12px 0 4px;
+}
+
+.bar {
+  background: #e8edf3;
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.barFill {
+  background: #2f7d8c;
+  height: 100%;
+}
+
+.questionnaireGrid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+}
+
+.questionnaireList,
+.observationList {
+  display: grid;
+  gap: 8px;
+}
+
+.observationRow {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(160px, 1fr) minmax(100px, 0.35fr) minmax(110px, 0.35fr);
+  padding: 10px 12px;
+}
+
+.codeText {
+  color: #6b7788;
+  font-size: 0.75rem;
+}
+
+.empty {
+  align-items: center;
+  color: #657386;
+  display: flex;
+  min-height: 160px;
+  justify-content: center;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .header,
+  .toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .statGrid,
+  .scoreGrid,
+  .questionnaireGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .patientRow,
+  .observationRow {
+    grid-template-columns: 1fr;
+  }
+}
