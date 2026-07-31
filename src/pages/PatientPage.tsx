@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import { Grid, Loader } from '@mantine/core';
+import { Group, Loader, Paper, Stack, Text } from '@mantine/core';
+import { calculateAgeString, capitalize, formatHumanName } from '@medplum/core';
 import type { Patient } from '@medplum/fhirtypes';
-import { PatientSummary, useMedplum } from '@medplum/react';
+import { useMedplum } from '@medplum/react';
 import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import { useParams } from 'react-router';
@@ -28,13 +29,44 @@ export function PatientPage(): JSX.Element {
   }
 
   return (
-    <Grid>
-      <Grid.Col span={4}>
-        <PatientSummary patient={patient} />
-      </Grid.Col>
-      <Grid.Col span={8}>
-        <PatientDetails patient={patient} onChange={onPatientChange} />
-      </Grid.Col>
-    </Grid>
+    <Stack gap={0}>
+      <PatientHeader patient={patient} />
+      <PatientDetails patient={patient} onChange={onPatientChange} />
+    </Stack>
+  );
+}
+
+// This study only tracks patient identity and questionnaire results — @medplum/react's PatientSummary
+// pulls in 13 unrelated resource types (insurance, allergies, problems, medications, vitals, etc.) that
+// aren't used here, so a minimal header replaces it instead. It's full-width and sticky (stays pinned
+// below the app header while the questionnaire content scrolls underneath) rather than a side column,
+// since the questionnaire results below are the actual point of this page.
+function PatientHeader(props: { patient: Patient }): JSX.Element {
+  const age = props.patient.birthDate ? calculateAgeString(props.patient.birthDate) : undefined;
+
+  return (
+    <Paper withBorder p="md" radius={0} style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+      <Group justify="space-between" wrap="wrap" gap="md">
+        <Text fz="h4" fw={800}>
+          {formatHumanName(props.patient.name?.[0])}
+        </Text>
+        <Group gap="lg">
+          <Group gap={6}>
+            <Text c="dimmed" size="sm">
+              Birthdate:
+            </Text>
+            <Text size="sm">
+              {props.patient.birthDate ? `${props.patient.birthDate}${age ? ` (${age})` : ''}` : 'Unknown'}
+            </Text>
+          </Group>
+          <Group gap={6}>
+            <Text c="dimmed" size="sm">
+              Gender:
+            </Text>
+            <Text size="sm">{props.patient.gender ? capitalize(props.patient.gender) : 'Unknown'}</Text>
+          </Group>
+        </Group>
+      </Group>
+    </Paper>
   );
 }

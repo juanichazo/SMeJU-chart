@@ -4,22 +4,27 @@ import type { ChartData, ChartOptions } from 'chart.js';
 import { lazy, Suspense } from 'react';
 import type { ComponentType, JSX } from 'react';
 
-const lineChartOptions = {
-  responsive: true,
-  scales: {
-    y: {
-      min: 0,
+function getLineChartOptions(showLegend: boolean): ChartOptions<'line'> {
+  return {
+    responsive: true,
+    scales: {
+      y: {
+        min: 0,
+      },
     },
-  },
-  plugins: {
-    legend: {
-      position: 'bottom' as const,
+    plugins: {
+      legend: {
+        display: showLegend,
+        position: 'bottom' as const,
+      },
     },
-  },
-};
+  };
+}
 
 interface LineChartProps {
   readonly chartData: ChartData<'line', number[], string>;
+  /** Whether to show the dataset legend below the chart. Defaults to true. */
+  readonly showLegend?: boolean;
 }
 
 const AsyncLine = lazy(async () => {
@@ -33,11 +38,11 @@ const AsyncLine = lazy(async () => {
   };
 });
 
-export function LineChart({ chartData }: LineChartProps): JSX.Element {
+export function LineChart({ chartData, showLegend = true }: LineChartProps): JSX.Element {
   return (
-    <div className="my-5">
+    <div style={{ margin: '1.25rem 0' }}>
       <Suspense fallback={<div>Loading...</div>}>
-        <AsyncLine options={lineChartOptions} data={chartData} />
+        <AsyncLine options={getLineChartOptions(showLegend)} data={chartData} />
       </Suspense>
     </div>
   );

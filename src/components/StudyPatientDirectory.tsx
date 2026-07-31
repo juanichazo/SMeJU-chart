@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 import { Badge, Group, Loader, TextInput } from '@mantine/core';
-import type { Observation, Patient, Resource } from '@medplum/fhirtypes';
+import type { Observation, Patient } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react';
 import { IconArrowRight, IconSearch, IconUsers } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -18,7 +18,10 @@ interface PatientSummaryRow {
 
 interface ProjectMeta {
   project?: string;
-  compartment?: { reference?: string }[];
+}
+
+function belongsToProject(resource: { meta?: ProjectMeta }): boolean {
+  return resource.meta?.project === MEDPLUM_PROJECT_ID;
 }
 
 export function StudyPatientDirectory(): JSX.Element {
@@ -33,10 +36,9 @@ export function StudyPatientDirectory(): JSX.Element {
     async function loadPatients(): Promise<void> {
       setLoading(true);
       try {
-        const { patients, serverConstrained } = await searchProjectPatients();
-        const visiblePatients = filterProjectResources(patients, serverConstrained);
+        const patients = await searchProjectPatients();
         const summaries = await Promise.all(
-          visiblePatients.map(async (patient) => {
+          patients.map(async (patient) => {
             const observations = await searchPatientObservations(patient.id as string);
             return {
               patient,
@@ -60,40 +62,21 @@ export function StudyPatientDirectory(): JSX.Element {
       }
     }
 
-    async function searchProjectPatients(): Promise<{ patients: Patient[]; serverConstrained: boolean }> {
-      try {
-        const patients = await medplum.searchResources('Patient', {
-          _count: 100,
-          _sort: '-_lastUpdated',
-          _project: MEDPLUM_PROJECT_ID,
-        } as Record<string, string | number>);
-        return { patients, serverConstrained: true };
-      } catch (err) {
-        console.warn('Project search parameter unavailable; falling back to resource metadata filtering.', err);
-        const patients = await medplum.searchResources('Patient', {
-          _count: 100,
-          _sort: '-_lastUpdated',
-        } as Record<string, string | number>);
-        return { patients, serverConstrained: false };
-      }
+    async function searchProjectPatients(): Promise<Patient[]> {
+      const patients = await medplum.searchResources('Patient', {
+        _count: 100,
+        _sort: '-_lastUpdated',
+      });
+      return patients.filter(belongsToProject);
     }
 
     async function searchPatientObservations(patientId: string): Promise<Observation[]> {
-      try {
-        return await medplum.searchResources('Observation', {
-          patient: `Patient/${patientId}`,
-          _count: 200,
-          _sort: '-date',
-          _project: MEDPLUM_PROJECT_ID,
-        } as Record<string, string | number>);
-      } catch (_err) {
-        const observations = await medplum.searchResources('Observation', {
-          patient: `Patient/${patientId}`,
-          _count: 200,
-          _sort: '-date',
-        } as Record<string, string | number>);
-        return filterProjectResources(observations, false);
-      }
+      const observations = await medplum.searchResources('Observation', {
+        patient: `Patient/${patientId}`,
+        _count: 200,
+        _sort: '-date',
+      });
+      return observations.filter(belongsToProject);
     }
 
     loadPatients().catch(console.error);
@@ -131,7 +114,7 @@ export function StudyPatientDirectory(): JSX.Element {
         <Metric label="Project patients" value={rows.length} />
         <Metric label="With observations" value={patientsWithData} />
         <Metric label="Observation records" value={totalObservations} />
-        <Metric label="Questionnaires tracked" value={7} />
+        <Metric label="Questionnaires tracked" value={8} />
       </div>
 
       <section className={classes.panel}>
@@ -157,7 +140,7 @@ export function StudyPatientDirectory(): JSX.Element {
         ) : (
           <div className={classes.patientList}>
             {filteredRows.map((row) => (
-              <Link className={classes.patientRow} to={`/Patient/${row.patient.id}/observations`} key={row.patient.id}>
+              <Link className={classes.patientRow} to={`/Patient/${row.patient.id}/questionnaires`} key={row.patient.id}>
                 <div>
                   <div className={classes.patientName}>{getPatientName(row.patient)}</div>
                   <div className={classes.muted}>{row.patient.id}</div>
@@ -193,17 +176,6 @@ function Metric(props: { label: string; value: number }): JSX.Element {
       <div className={classes.statValue}>{props.value}</div>
     </div>
   );
-}
-
-function filterProjectResources<T extends Resource>(resources: T[], serverConstrained: boolean): T[] {
-  return resources.filter((resource) => {
-    const meta = resource.meta as ProjectMeta | undefined;
-    const projectReference = `Project/${MEDPLUM_PROJECT_ID}`;
-    const hasProjectMeta = Boolean(meta?.project || meta?.compartment?.length);
-    const belongsToProject =
-      meta?.project === MEDPLUM_PROJECT_ID || meta?.compartment?.some((item) => item.reference === projectReference);
-    return belongsToProject || (serverConstrained && !hasProjectMeta);
-  });
 }
 
 function getPatientName(patient: Patient): string {

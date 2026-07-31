@@ -24,3 +24,5 @@ data/core/example-bots.json
 *.njsproj
 *.sln
 *.sw?
+
+Questionnaires/*

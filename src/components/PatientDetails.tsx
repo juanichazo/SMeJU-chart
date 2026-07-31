@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router';
 import { cleanResource } from '../utils';
 import { ClinicalImpressionDisplay } from './ClinicalImpressionDisplay';
 import { PatientObservations } from './PatientObservations';
+import { StudyObservationDashboard } from './StudyObservationDashboard';
 
 interface PatientDetailsProps {
   patient: Patient;
@@ -23,13 +24,17 @@ export function PatientDetails(props: PatientDetailsProps): JSX.Element {
   const navigate = useNavigate();
   const id = props.patient.id;
 
+  // Questionnaires is first so it's the default tab — this study only tracks patient identity and
+  // questionnaire results. Encounters/Clinical Impressions/Observations (vitals) are hidden as unused;
+  // kept here commented out (not deleted) in case a future study needs them back.
   const tabs = [
+    ['questionnaires', 'Questionnaires'],
     ['details', 'Details'],
     ['edit', 'Edit'],
     ['history', 'History'],
-    ['encounter', 'Encounters'],
-    ['clinical', 'Clinical Impressions'],
-    ['observations', 'Observations'],
+    // ['encounter', 'Encounters'],
+    // ['clinical', 'Clinical Impressions'],
+    // ['observations', 'Observations'],
   ];
   // Get the current tab
   const tab = window.location.pathname.split('/').pop();
@@ -79,6 +84,9 @@ export function PatientDetails(props: PatientDetailsProps): JSX.Element {
             </Tabs.Tab>
           ))}
         </Tabs.List>
+        <Tabs.Panel value="questionnaires">
+          <StudyObservationDashboard patient={props.patient} />
+        </Tabs.Panel>
         <Tabs.Panel value="details">
           <ResourceTable value={props.patient} />
         </Tabs.Panel>
@@ -88,6 +96,7 @@ export function PatientDetails(props: PatientDetailsProps): JSX.Element {
         <Tabs.Panel value="history">
           <ResourceHistoryTable resourceType="Patient" id={id} />
         </Tabs.Panel>
+        {/*
         <Tabs.Panel value="encounter">
           <SearchControl
             search={encounterSearch}
@@ -102,6 +111,7 @@ export function PatientDetails(props: PatientDetailsProps): JSX.Element {
         <Tabs.Panel value="observations">
           <PatientObservations patient={props.patient} />
         </Tabs.Panel>
+        */}
       </Tabs>
     </Document>
   );

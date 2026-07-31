@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { AppShell, ErrorBoundary, Loading, Logo, useMedplum, useMedplumProfile } from '@medplum/react';
 import {
+  IconClipboardData,
   IconClipboardHeart,
   IconClipboardList,
   IconDatabaseImport,
@@ -13,6 +14,7 @@ import {
 import { Suspense } from 'react';
 import type { JSX } from 'react';
 import { Route, Routes } from 'react-router';
+import { StudyPatientDirectory } from './components/StudyPatientDirectory';
 import { EncounterPage } from './pages/EncounterPage';
 import { LandingPage } from './pages/LandingPage';
 import { PatientPage } from './pages/PatientPage';
@@ -35,28 +37,32 @@ export function App(): JSX.Element | null {
       menus={[
         {
           title: 'Charts',
-          links: [{ icon: <IconUser />, label: 'Patients', href: '/Patient' }],
-        },
-        {
-          title: 'Encounters',
           links: [
-            { icon: <IconClipboardList />, label: 'All Encounters', href: '/Encounter' },
-            {
-              icon: <IconClipboardHeart />,
-              label: 'My Encounters',
-              href: `/Encounter?participant=Practitioner/${profile?.id}`,
-            },
+            { icon: <IconUser />, label: 'Patients', href: '/Patient' },
+            { icon: <IconClipboardData />, label: 'Study Dashboard', href: '/study' },
           ],
         },
-        {
-          title: 'Upload Data',
-          links: [
-            { icon: <IconDatabaseImport />, label: 'Upload Core ValueSets', href: '/upload/core' },
-            { icon: <IconQuestionMark />, label: 'Upload Questionnaires', href: '/upload/questionnaire' },
-            { icon: <IconRobot />, label: 'Upload Example Bots', href: '/upload/bots' },
-            { icon: <IconHealthRecognition />, label: 'Upload Example Patient Data', href: '/upload/example' },
-          ],
-        },
+        // Hidden from nav for the study-tracking workflow; routes still work via direct URL. Uncomment to restore.
+        // {
+        //   title: 'Encounters',
+        //   links: [
+        //     { icon: <IconClipboardList />, label: 'All Encounters', href: '/Encounter' },
+        //     {
+        //       icon: <IconClipboardHeart />,
+        //       label: 'My Encounters',
+        //       href: `/Encounter?participant=Practitioner/${profile?.id}`,
+        //     },
+        //   ],
+        // },
+        // {
+        //   title: 'Upload Data',
+        //   links: [
+        //     { icon: <IconDatabaseImport />, label: 'Upload Core ValueSets', href: '/upload/core' },
+        //     { icon: <IconQuestionMark />, label: 'Upload Questionnaires', href: '/upload/questionnaire' },
+        //     { icon: <IconRobot />, label: 'Upload Example Bots', href: '/upload/bots' },
+        //     { icon: <IconHealthRecognition />, label: 'Upload Example Patient Data', href: '/upload/example' },
+        //   ],
+        // },
       ]}
     >
       <ErrorBoundary>
@@ -64,6 +70,7 @@ export function App(): JSX.Element | null {
           <Routes>
             <Route path="/" element={profile ? <SearchPage /> : <LandingPage />} />
             <Route path="/signin" element={<SignInPage />} />
+            <Route path="/study" element={<StudyPatientDirectory />} />
             <Route path="/Patient/:id">
               <Route index element={<PatientPage />} />
               <Route path="*" element={<PatientPage />} />

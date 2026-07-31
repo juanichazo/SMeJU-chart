@@ -1,11 +1,14 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import { Badge, Group, Loader, SegmentedControl, Stack } from '@mantine/core';
-import type { CodeableConcept, Coding, Observation, Patient, Questionnaire, QuestionnaireItem } from '@medplum/fhirtypes';
-import { useMedplum } from '@medplum/react';
+import { Badge, Chip, Group, Loader, Stack } from '@mantine/core';
+import type { MedplumClient } from '@medplum/core';
+import type { CodeableConcept, Observation, Patient, Questionnaire } from '@medplum/fhirtypes';
+import { ObservationTable, useMedplum } from '@medplum/react';
 import { IconActivity, IconClipboardData, IconFileAnalytics } from '@tabler/icons-react';
+import type { ChartData } from 'chart.js';
 import { useEffect, useMemo, useState } from 'react';
 import type { JSX } from 'react';
+import { LineChart } from './graphs/LineChart';
 import audit from '../../Questionnaires/AUDIT.json';
 import ctq from '../../Questionnaires/CTQ-SF.json';
 import demographics from '../../Questionnaires/DatosSociodemograficosEstudiantes.json';
@@ -13,6 +16,7 @@ import gad from '../../Questionnaires/GAD-7.json';
 import hits from '../../Questionnaires/HITS.json';
 import mos from '../../Questionnaires/MOS-SSS.json';
 import phq from '../../Questionnaires/PHQ-9.json';
+import sdoh from '../../Questionnaires/SDOH.json';
 import { MEDPLUM_PROJECT_ID } from '../config';
 import classes from './StudyDashboard.module.css';
 
@@ -20,79 +24,181 @@ interface StudyObservationDashboardProps {
   patient: Patient;
 }
 
-interface QuestionnaireDefinition {
-  id: string;
-  title: string;
-  codes: Set<string>;
-  maxScore?: number;
-}
-
 interface ProjectMeta {
   project?: string;
-  compartment?: { reference?: string }[];
 }
 
-const questionnaires = [audit, ctq, demographics, gad, hits, mos, phq].map((q) =>
-  buildQuestionnaireDefinition(q as Questionnaire)
-);
+function belongsToProject(resource: { meta?: ProjectMeta }): boolean {
+  return resource.meta?.project === MEDPLUM_PROJECT_ID;
+}
 
-const scoreDefinitions: Record<string, { max: number; label: string; ranges: { max: number; label: string; color: string }[] }> = {
-  '44261-6': {
-    max: 27,
-    label: 'PHQ-9',
-    ranges: [
-      { max: 4, label: 'Minimal', color: 'green' },
-      { max: 9, label: 'Mild', color: 'yellow' },
-      { max: 14, label: 'Moderate', color: 'orange' },
-      { max: 19, label: 'Moderately severe', color: 'red' },
-      { max: 27, label: 'Severe', color: 'red' },
-    ],
-  },
-  '69737-5': {
-    max: 21,
-    label: 'GAD-7',
-    ranges: [
-      { max: 4, label: 'Minimal', color: 'green' },
-      { max: 9, label: 'Mild', color: 'yellow' },
-      { max: 14, label: 'Moderate', color: 'orange' },
-      { max: 21, label: 'Severe', color: 'red' },
-    ],
-  },
-  '58628': {
-    max: 21,
-    label: 'GAD-7',
-    ranges: [
-      { max: 4, label: 'Minimal', color: 'green' },
-      { max: 9, label: 'Mild', color: 'yellow' },
-      { max: 14, label: 'Moderate', color: 'orange' },
-      { max: 21, label: 'Severe', color: 'red' },
-    ],
-  },
-};
+// Matching by LOINC code turned out to be unreliable: confirmed against real submitted data that some
+// questionnaires (AUDIT, HITS) record Observations with NO code at all (only a free-text code.text), so
+// no code list could ever match them. Every sampled Observation DOES carry a correct `derivedFrom` link to
+// the QuestionnaireResponse it came from, which is a much more reliable signal — so questionnaire identity
+// is now resolved via derivedFrom -> QuestionnaireResponse.questionnaire (a canonical URL) instead.
+//
+// The local Questionnaires/*.json files are kept only as a fast, no-network-call lookup for the
+// questionnaires we already know about (matched by their own `url` field). Anything else the patient
+// answered is still shown — its title is resolved with one live Questionnaire lookup — since all
+// questionnaire results for this project's patients are wanted, not just the locally known ones.
+//
+// data/core/encounter-note-questionnaires.json confirms the 3 encounter-note questionnaires
+// (encounter-note, obstetric-visit, gynecology-visit) are a separate, unrelated set: those bots
+// (src/bots/core/*-encounter-note.ts) also stamp `derivedFrom` on their vitals Observations, which already
+// have their own "Observations" tab — they must not show up here as fake "score" cards.
+const ENCOUNTER_NOTE_QUESTIONNAIRE_NAMES = new Set(['encounter-note', 'obstetric-visit', 'gynecology-visit']);
+
+interface LocalQuestionnaire {
+  url: string;
+  title: string;
+  name?: string;
+}
+
+const localQuestionnaires: LocalQuestionnaire[] = [audit, ctq, demographics, gad, hits, mos, phq, sdoh]
+  .map((q) => q as Questionnaire)
+  .filter((q): q is Questionnaire & { url: string } => Boolean(q.url))
+  .map((q) => ({ url: q.url, title: q.title ?? q.name ?? 'Questionnaire', name: q.name }));
+
+const localQuestionnairesByUrl = new Map(localQuestionnaires.map((q) => [q.url, q]));
+
+interface QuestionnaireIdentity {
+  id: string;
+  title: string;
+}
+
+// Cached across patients — the set of questionnaires in a deployment is small and stable, so this avoids
+// re-resolving the same QuestionnaireResponse/Questionnaire lookups every time a new patient is viewed.
+const identityCache = new Map<string, QuestionnaireIdentity | undefined>();
+const responseIdentityCache = new Map<string, QuestionnaireIdentity | undefined>();
+
+async function resolveQuestionnaireIdentity(
+  medplum: MedplumClient,
+  questionnaireCanonicalUrl: string | undefined
+): Promise<QuestionnaireIdentity | undefined> {
+  if (!questionnaireCanonicalUrl) {
+    return undefined;
+  }
+  const url = questionnaireCanonicalUrl.split('|')[0];
+  if (identityCache.has(url)) {
+    return identityCache.get(url);
+  }
+
+  const local = localQuestionnairesByUrl.get(url);
+  if (local) {
+    const identity = ENCOUNTER_NOTE_QUESTIONNAIRE_NAMES.has(local.name ?? '') ? undefined : { id: url, title: local.title };
+    identityCache.set(url, identity);
+    return identity;
+  }
+
+  try {
+    const resource = await medplum.searchOne('Questionnaire', { url });
+    const identity =
+      resource && !ENCOUNTER_NOTE_QUESTIONNAIRE_NAMES.has(resource.name ?? '')
+        ? { id: url, title: resource.title ?? resource.name ?? 'Questionnaire' }
+        : undefined;
+    identityCache.set(url, identity);
+    return identity;
+  } catch (err) {
+    console.warn('Could not resolve Questionnaire for', url, err);
+    identityCache.set(url, undefined);
+    return undefined;
+  }
+}
+
+async function resolveResponseIdentity(medplum: MedplumClient, responseId: string): Promise<QuestionnaireIdentity | undefined> {
+  if (responseIdentityCache.has(responseId)) {
+    return responseIdentityCache.get(responseId);
+  }
+  try {
+    const response = await medplum.readResource('QuestionnaireResponse', responseId);
+    const identity = await resolveQuestionnaireIdentity(medplum, response.questionnaire);
+    responseIdentityCache.set(responseId, identity);
+    return identity;
+  } catch (err) {
+    console.warn('Could not resolve QuestionnaireResponse', responseId, err);
+    responseIdentityCache.set(responseId, undefined);
+    return undefined;
+  }
+}
+
+interface QuestionnaireGroup {
+  id: string;
+  title: string;
+  observations: Observation[];
+}
+
+function getDerivedFromResponseId(observation: Observation): string | undefined {
+  const ref = observation.derivedFrom?.[0]?.reference;
+  return ref?.startsWith('QuestionnaireResponse/') ? ref.slice('QuestionnaireResponse/'.length) : undefined;
+}
+
+async function groupObservationsByQuestionnaire(
+  medplum: MedplumClient,
+  observations: Observation[]
+): Promise<Map<string, QuestionnaireGroup>> {
+  const responseIds = new Set<string>();
+  for (const observation of observations) {
+    const responseId = getDerivedFromResponseId(observation);
+    if (responseId) {
+      responseIds.add(responseId);
+    }
+  }
+
+  const identityByResponseId = new Map<string, QuestionnaireIdentity | undefined>();
+  await Promise.all(
+    Array.from(responseIds).map(async (responseId) => {
+      identityByResponseId.set(responseId, await resolveResponseIdentity(medplum, responseId));
+    })
+  );
+
+  const groups = new Map<string, QuestionnaireGroup>();
+  for (const observation of observations) {
+    const responseId = getDerivedFromResponseId(observation);
+    const identity = responseId ? identityByResponseId.get(responseId) : undefined;
+    if (!identity) {
+      continue;
+    }
+    const group = groups.get(identity.id) ?? { id: identity.id, title: identity.title, observations: [] };
+    group.observations.push(observation);
+    groups.set(identity.id, group);
+  }
+  return groups;
+}
 
 export function StudyObservationDashboard(props: StudyObservationDashboardProps): JSX.Element {
   const medplum = useMedplum();
   const [observations, setObservations] = useState<Observation[]>([]);
+  const [groups, setGroups] = useState<Map<string, QuestionnaireGroup>>(new Map());
   const [loading, setLoading] = useState(true);
   const [selectedQuestionnaire, setSelectedQuestionnaire] = useState('all');
 
   useEffect(() => {
     let alive = true;
 
-    async function loadObservations(): Promise<void> {
+    async function load(): Promise<void> {
       if (!props.patient.id) {
         return;
       }
       setLoading(true);
       try {
-        const result = await searchProjectObservations(props.patient.id);
-        if (alive) {
-          setObservations(result);
+        const raw = await medplum.searchResources('Observation', {
+          patient: `Patient/${props.patient.id}`,
+          _count: 500,
+          _sort: '-date',
+        });
+        const filtered = raw.filter(belongsToProject);
+        const resolvedGroups = await groupObservationsByQuestionnaire(medplum, filtered);
+        if (!alive) {
+          return;
         }
+        setObservations(filtered);
+        setGroups(resolvedGroups);
       } catch (err) {
         console.error(err);
         if (alive) {
           setObservations([]);
+          setGroups(new Map());
         }
       } finally {
         if (alive) {
@@ -101,34 +207,15 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
       }
     }
 
-    async function searchProjectObservations(patientId: string): Promise<Observation[]> {
-      try {
-        return await medplum.searchResources('Observation', {
-          patient: `Patient/${patientId}`,
-          _count: 500,
-          _sort: '-date',
-          _project: MEDPLUM_PROJECT_ID,
-        } as Record<string, string | number>);
-      } catch (err) {
-        console.warn('Project search parameter unavailable; falling back to resource metadata filtering.', err);
-        const fallback = await medplum.searchResources('Observation', {
-          patient: `Patient/${patientId}`,
-          _count: 500,
-          _sort: '-date',
-        } as Record<string, string | number>);
-        return filterProjectResources(fallback);
-      }
-    }
-
-    loadObservations().catch(console.error);
+    load().catch(console.error);
 
     return () => {
       alive = false;
     };
   }, [medplum, props.patient.id]);
 
-  const groups = useMemo(() => groupObservationsByQuestionnaire(observations), [observations]);
   const scoreObservations = useMemo(() => getScoreObservations(observations), [observations]);
+  const questionnaireCards = useMemo(() => Array.from(groups.values()).filter((g) => g.observations.length > 0), [groups]);
   const visibleObservations = useMemo(() => {
     if (selectedQuestionnaire === 'all') {
       return observations;
@@ -148,7 +235,7 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
     <Stack gap="md">
       <div className={classes.statGrid}>
         <Metric label="Total observations" value={observations.length} />
-        <Metric label="Questionnaire groups" value={Array.from(groups.values()).filter((g) => g.observations.length).length} />
+        <Metric label="Questionnaire groups" value={questionnaireCards.length} />
         <Metric label="Score results" value={scoreObservations.length} />
         <Metric label="Recent records" value={visibleObservations.slice(0, 12).length} />
       </div>
@@ -157,18 +244,18 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
         <div className={classes.toolbar}>
           <div>
             <div className={classes.title}>Questionnaire scores</div>
-            <div className={classes.muted}>Latest numeric conclusions detected in Observation resources.</div>
+            <div className={classes.muted}>Latest submission per questionnaire, with score evolution over time.</div>
           </div>
           <Badge leftSection={<IconActivity size={14} />} color="teal" variant="light">
             {getPatientName(props.patient)}
           </Badge>
         </div>
-        {scoreObservations.length === 0 ? (
+        {questionnaireCards.length === 0 ? (
           <div className={classes.empty}>No questionnaire score observations found yet.</div>
         ) : (
           <div className={classes.scoreGrid}>
-            {scoreObservations.slice(0, 6).map((observation) => (
-              <ScoreCard observation={observation} key={observation.id ?? getObservationKey(observation)} />
+            {questionnaireCards.map((group) => (
+              <QuestionnaireScoreCard title={group.title} observations={group.observations} key={group.id} />
             ))}
           </div>
         )}
@@ -179,34 +266,38 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
           <div className={classes.toolbar}>
             <div>
               <div className={classes.title}>Questionnaires</div>
-              <div className={classes.muted}>Observation records matched to the local questionnaire folder.</div>
+              <div className={classes.muted}>Every questionnaire this patient has submitted, resolved via derivedFrom.</div>
             </div>
             <IconClipboardData size={22} />
           </div>
-          <SegmentedControl
-            fullWidth
-            value={selectedQuestionnaire}
-            onChange={setSelectedQuestionnaire}
-            data={[
-              { label: 'All', value: 'all' },
-              ...questionnaires.map((q) => ({ label: shortTitle(q.title), value: q.id })),
-            ]}
-          />
+          {/*
+            A SegmentedControl doesn't wrap — with many questionnaires it silently squeezed some options
+            out of reach. Chips wrap onto multiple lines instead, so every filter stays reachable.
+          */}
+          <Chip.Group value={selectedQuestionnaire} onChange={(value) => setSelectedQuestionnaire(value as string)}>
+            <Group gap={8} wrap="wrap">
+              <Chip value="all" variant="light">
+                All
+              </Chip>
+              {questionnaireCards.map((g) => (
+                <Chip value={g.id} variant="light" key={g.id}>
+                  {shortTitle(g.title)}
+                </Chip>
+              ))}
+            </Group>
+          </Chip.Group>
           <div className={classes.questionnaireList} style={{ marginTop: 12 }}>
-            {questionnaires.map((questionnaire) => {
-              const count = groups.get(questionnaire.id)?.observations.length ?? 0;
-              return (
-                <Group justify="space-between" key={questionnaire.id}>
-                  <div>
-                    <div className={classes.metric}>{questionnaire.title}</div>
-                    <div className={classes.muted}>{count} matched observations</div>
-                  </div>
-                  <Badge variant="light" color={count > 0 ? 'teal' : 'gray'}>
-                    {count}
-                  </Badge>
-                </Group>
-              );
-            })}
+            {questionnaireCards.map((group) => (
+              <Group justify="space-between" key={group.id}>
+                <div>
+                  <div className={classes.metric}>{group.title}</div>
+                  <div className={classes.muted}>{group.observations.length} matched observations</div>
+                </div>
+                <Badge variant="light" color="teal">
+                  {group.observations.length}
+                </Badge>
+              </Group>
+            ))}
           </div>
         </div>
 
@@ -221,10 +312,8 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
           {visibleObservations.length === 0 ? (
             <div className={classes.empty}>No observations in this selection.</div>
           ) : (
-            <div className={classes.observationList}>
-              {visibleObservations.slice(0, 40).map((observation) => (
-                <ObservationRow observation={observation} key={observation.id ?? getObservationKey(observation)} />
-              ))}
+            <div style={{ overflowX: 'auto' }}>
+              <ObservationTable value={visibleObservations.slice(0, 40)} />
             </div>
           )}
         </div>
@@ -242,122 +331,48 @@ function Metric(props: { label: string; value: number }): JSX.Element {
   );
 }
 
-function ScoreCard(props: { observation: Observation }): JSX.Element {
-  const value = getObservationNumber(props.observation);
-  const code = getObservationCodes(props.observation)[0];
-  const definition = code ? scoreDefinitions[code] : undefined;
-  const max = definition?.max ?? Math.max(value ?? 0, 1);
-  const range = definition?.ranges.find((item) => value !== undefined && value <= item.max);
-  const percent = value === undefined ? 0 : Math.max(0, Math.min(100, (value / max) * 100));
+function QuestionnaireScoreCard(props: { title: string; observations: Observation[] }): JSX.Element {
+  const latest = props.observations[0];
+  const value = getObservationNumber(latest);
+  const interpretation = latest.interpretation?.[0];
+  const interpretationText = interpretation ? getConceptText(interpretation) : undefined;
+  const chartData = useMemo(() => buildTrendChartData(props.title, props.observations), [props.title, props.observations]);
 
   return (
     <div className={classes.scoreCard}>
       <div className={classes.scoreHeader}>
-        <div>
-          <div className={classes.metric}>{definition?.label ?? getConceptText(props.observation.code)}</div>
-          <div className={classes.muted}>{formatDate(props.observation.effectiveDateTime ?? props.observation.issued)}</div>
-        </div>
-        <Badge color={range?.color ?? 'gray'} variant="light">
-          {range?.label ?? props.observation.status}
-        </Badge>
+        <div className={classes.metric}>{props.title}</div>
+        <div className={classes.muted}>{formatDate(latest.effectiveDateTime ?? latest.issued)}</div>
       </div>
-      <div className={classes.scoreValue}>{value ?? getObservationValue(props.observation)}</div>
-      <div className={classes.bar}>
-        <div className={classes.barFill} style={{ width: `${percent}%` }} />
+      <div className={interpretationText ? classes.interpretation : classes.interpretationEmpty}>
+        {interpretationText ?? 'No interpretation'}
       </div>
-      <div className={classes.codeText}>{getConceptText(props.observation.code)}</div>
+      <div className={classes.scoreValue}>{value ?? getObservationValue(latest)}</div>
+      <LineChart chartData={chartData} showLegend={false} />
     </div>
   );
 }
 
-function ObservationRow(props: { observation: Observation }): JSX.Element {
-  const date = props.observation.effectiveDateTime ?? props.observation.issued;
-  return (
-    <div className={classes.observationRow}>
-      <div>
-        <div className={classes.metric}>{getConceptText(props.observation.code)}</div>
-        <div className={classes.codeText}>{getObservationCodes(props.observation).join(', ') || 'No code'}</div>
-      </div>
-      <div>
-        <div className={classes.muted}>Value</div>
-        <div className={classes.metric}>{getObservationValue(props.observation)}</div>
-      </div>
-      <div>
-        <div className={classes.muted}>Date</div>
-        <div className={classes.metric}>{formatDate(date)}</div>
-      </div>
-    </div>
-  );
-}
-
-function buildQuestionnaireDefinition(questionnaire: Questionnaire): QuestionnaireDefinition {
-  const codes = new Set<string>();
-  for (const coding of questionnaire.code ?? []) {
-    if (coding.code) {
-      codes.add(coding.code);
-    }
-  }
-  collectItemCodes(questionnaire.item ?? [], codes);
+function buildTrendChartData(label: string, observations: Observation[]): ChartData<'line', number[], string> {
+  // Search results are sorted newest-first; the trend graph reads left-to-right, oldest-first.
+  const history = [...observations].reverse();
   return {
-    id: questionnaire.id ?? questionnaire.name ?? questionnaire.title ?? crypto.randomUUID(),
-    title: questionnaire.title ?? questionnaire.name ?? 'Questionnaire',
-    codes,
+    labels: history.map((observation) => formatDate(observation.effectiveDateTime ?? observation.issued)),
+    datasets: [
+      {
+        label,
+        data: history.map((observation) => getObservationNumber(observation) ?? 0),
+        backgroundColor: 'rgba(29, 112, 214, 0.7)',
+        borderColor: 'rgba(29, 112, 214, 1)',
+      },
+    ],
   };
-}
-
-function collectItemCodes(items: QuestionnaireItem[], codes: Set<string>): void {
-  for (const item of items) {
-    for (const coding of item.code ?? []) {
-      if (coding.code) {
-        codes.add(coding.code);
-      }
-    }
-    collectItemCodes(item.item ?? [], codes);
-  }
-}
-
-function groupObservationsByQuestionnaire(
-  observations: Observation[]
-): Map<string, { questionnaire: QuestionnaireDefinition; observations: Observation[] }> {
-  const groups = new Map<string, { questionnaire: QuestionnaireDefinition; observations: Observation[] }>();
-  for (const questionnaire of questionnaires) {
-    groups.set(questionnaire.id, { questionnaire, observations: [] });
-  }
-  for (const observation of observations) {
-    const codes = getObservationCodes(observation);
-    const questionnaire = questionnaires.find((q) => codes.some((code) => q.codes.has(code)));
-    if (questionnaire) {
-      groups.get(questionnaire.id)?.observations.push(observation);
-    }
-  }
-  return groups;
 }
 
 function getScoreObservations(observations: Observation[]): Observation[] {
   return observations
-    .filter((observation) => {
-      const codes = getObservationCodes(observation);
-      return codes.some((code) => scoreDefinitions[code]) || getObservationNumber(observation) !== undefined;
-    })
+    .filter((observation) => getObservationNumber(observation) !== undefined)
     .sort((a, b) => getDateMs(b) - getDateMs(a));
-}
-
-function filterProjectResources<T extends Observation>(resources: T[]): T[] {
-  return resources.filter((resource) => {
-    const meta = resource.meta as ProjectMeta | undefined;
-    const projectReference = `Project/${MEDPLUM_PROJECT_ID}`;
-    return meta?.project === MEDPLUM_PROJECT_ID || meta?.compartment?.some((item) => item.reference === projectReference);
-  });
-}
-
-function getObservationCodes(observation: Observation): string[] {
-  return getCodings(observation.code)
-    .map((coding) => coding.code)
-    .filter((code): code is string => Boolean(code));
-}
-
-function getCodings(concept: CodeableConcept | undefined): Coding[] {
-  return concept?.coding ?? [];
 }
 
 function getConceptText(concept: CodeableConcept | undefined): string {
@@ -370,9 +385,6 @@ function getObservationValue(observation: Observation): string {
   }
   if (observation.valueInteger !== undefined) {
     return String(observation.valueInteger);
-  }
-  if (observation.valueDecimal !== undefined) {
-    return String(observation.valueDecimal);
   }
   if (observation.valueString) {
     return observation.valueString;
@@ -392,15 +404,11 @@ function getObservationValue(observation: Observation): string {
 }
 
 function getObservationNumber(observation: Observation): number | undefined {
-  return observation.valueQuantity?.value ?? observation.valueInteger ?? observation.valueDecimal;
+  return observation.valueQuantity?.value ?? observation.valueInteger;
 }
 
 function getDateMs(observation: Observation): number {
   return new Date(observation.effectiveDateTime ?? observation.issued ?? 0).getTime();
-}
-
-function getObservationKey(observation: Observation): string {
-  return `${getConceptText(observation.code)}-${getDateMs(observation)}-${getObservationValue(observation)}`;
 }
 
 function getPatientName(patient: Patient): string {
@@ -421,5 +429,6 @@ function shortTitle(title: string): string {
     .replace('Alcohol Use Disorders Identification Test ', '')
     .replace('Childhood Trauma Questionnaire - Short Form ', '')
     .replace('Generalized Anxiety Disorder ', '')
-    .replace('Cuestionario de datos sociodemográficos', 'Sociodemographics');
+    .replace('Cuestionario de datos sociodemográficos', 'Sociodemographics')
+    .replace('Screening de Determinantes Sociales de la Salud (SDOH)', 'SDOH');
 }
