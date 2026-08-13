@@ -26,3 +26,5 @@ data/core/example-bots.json
 *.sw?
 
 Questionnaires/*
+.env
+config.ts
