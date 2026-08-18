@@ -13,7 +13,7 @@ import {
 } from '@tabler/icons-react';
 import { Suspense } from 'react';
 import type { JSX } from 'react';
-import { Route, Routes } from 'react-router';
+import { Link, Navigate, Route, Routes } from 'react-router';
 import { StudyPatientDirectory } from './components/StudyPatientDirectory';
 import { EncounterPage } from './pages/EncounterPage';
 import { LandingPage } from './pages/LandingPage';
@@ -33,16 +33,23 @@ export function App(): JSX.Element | null {
 
   return (
     <AppShell
-      logo={<Logo size={24} />}
+      // AppShell wraps `logo` in its own button that toggles the (now-empty) navbar — stopPropagation so
+      // this click only navigates home (the patient list) instead of also toggling that empty sidebar.
+      logo={
+        <Link to="/" onClick={(e) => e.stopPropagation()}>
+          <Logo size={24} />
+        </Link>
+      }
+      // The left nav bar is hidden entirely: Study Dashboard is now the home page (/), so there's nothing
+      // left worth navigating to from a sidebar. Routes still work via direct URL. Uncomment to restore.
       menus={[
-        {
-          title: 'Charts',
-          links: [
-            { icon: <IconUser />, label: 'Patients', href: '/Patient' },
-            { icon: <IconClipboardData />, label: 'Study Dashboard', href: '/study' },
-          ],
-        },
-        // Hidden from nav for the study-tracking workflow; routes still work via direct URL. Uncomment to restore.
+        // {
+        //   title: 'Charts',
+        //   links: [
+        //     { icon: <IconUser />, label: 'Patients', href: '/Patient' },
+        //     { icon: <IconClipboardData />, label: 'Study Dashboard', href: '/study' },
+        //   ],
+        // },
         // {
         //   title: 'Encounters',
         //   links: [
@@ -68,9 +75,11 @@ export function App(): JSX.Element | null {
       <ErrorBoundary>
         <Suspense fallback={<Loading />}>
           <Routes>
-            <Route path="/" element={profile ? <SearchPage /> : <LandingPage />} />
+            <Route path="/" element={profile ? <StudyPatientDirectory /> : <LandingPage />} />
             <Route path="/signin" element={<SignInPage />} />
             <Route path="/study" element={<StudyPatientDirectory />} />
+            {/* The generic Patient list is disabled — patients are found via the Study Dashboard now. */}
+            <Route path="/Patient" element={<Navigate to="/study" replace />} />
             <Route path="/Patient/:id">
               <Route index element={<PatientPage />} />
               <Route path="*" element={<PatientPage />} />

@@ -2,21 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Badge, Chip, Group, Loader, Stack } from '@mantine/core';
 import type { MedplumClient } from '@medplum/core';
-import type { CodeableConcept, Observation, Patient, Questionnaire } from '@medplum/fhirtypes';
+import type { CodeableConcept, Observation, Patient } from '@medplum/fhirtypes';
 import { ObservationTable, useMedplum } from '@medplum/react';
 import { IconActivity, IconClipboardData, IconFileAnalytics } from '@tabler/icons-react';
 import type { ChartData } from 'chart.js';
 import { useEffect, useMemo, useState } from 'react';
 import type { JSX } from 'react';
 import { LineChart } from './graphs/LineChart';
-import audit from '../../Questionnaires/AUDIT.json';
-import ctq from '../../Questionnaires/CTQ-SF.json';
-import demographics from '../../Questionnaires/DatosSociodemograficosEstudiantes.json';
-import gad from '../../Questionnaires/GAD-7.json';
-import hits from '../../Questionnaires/HITS.json';
-import mos from '../../Questionnaires/MOS-SSS.json';
-import phq from '../../Questionnaires/PHQ-9.json';
-import sdoh from '../../Questionnaires/SDOH.json';
+import { localQuestionnairesByUrl } from './trackedQuestionnaires';
 import { MEDPLUM_PROJECT_ID } from '../config';
 import classes from './StudyDashboard.module.css';
 
@@ -48,19 +41,6 @@ function belongsToProject(resource: { meta?: ProjectMeta }): boolean {
 // (src/bots/core/*-encounter-note.ts) also stamp `derivedFrom` on their vitals Observations, which already
 // have their own "Observations" tab — they must not show up here as fake "score" cards.
 const ENCOUNTER_NOTE_QUESTIONNAIRE_NAMES = new Set(['encounter-note', 'obstetric-visit', 'gynecology-visit']);
-
-interface LocalQuestionnaire {
-  url: string;
-  title: string;
-  name?: string;
-}
-
-const localQuestionnaires: LocalQuestionnaire[] = [audit, ctq, demographics, gad, hits, mos, phq, sdoh]
-  .map((q) => q as Questionnaire)
-  .filter((q): q is Questionnaire & { url: string } => Boolean(q.url))
-  .map((q) => ({ url: q.url, title: q.title ?? q.name ?? 'Questionnaire', name: q.name }));
-
-const localQuestionnairesByUrl = new Map(localQuestionnaires.map((q) => [q.url, q]));
 
 interface QuestionnaireIdentity {
   id: string;
@@ -333,35 +313,61 @@ function Metric(props: { label: string; value: number }): JSX.Element {
 
 function QuestionnaireScoreCard(props: { title: string; observations: Observation[] }): JSX.Element {
   const latest = props.observations[0];
-  const value = getObservationNumber(latest);
+  const isMultiComponent = Boolean(latest.component?.length);
   const interpretation = latest.interpretation?.[0];
   const interpretationText = interpretation ? getConceptText(interpretation) : undefined;
-  const chartData = useMemo(() => buildTrendChartData(props.title, props.observations), [props.title, props.observations]);
+  const chartData = useMemo(
+    () => (isMultiComponent ? buildMultiSeriesChartData(props.observations) : buildTrendChartData(props.title, props.observations)),
+    [isMultiComponent, props.title, props.observations]
+  );
 
   return (
-    <div className={classes.scoreCard}>
+    <div className={isMultiComponent ? `${classes.scoreCard} ${classes.scoreCardWide}` : classes.scoreCard}>
       <div className={classes.scoreHeader}>
         <div className={classes.metric}>{props.title}</div>
         <div className={classes.muted}>{formatDate(latest.effectiveDateTime ?? latest.issued)}</div>
       </div>
-      <div className={interpretationText ? classes.interpretation : classes.interpretationEmpty}>
-        {interpretationText ?? 'No interpretation'}
-      </div>
-      <div className={classes.scoreValue}>{value ?? getObservationValue(latest)}</div>
-      <LineChart chartData={chartData} showLegend={false} />
+      {interpretationText && <div className={classes.interpretation}>{interpretationText}</div>}
+      {isMultiComponent ? (
+        <div className={classes.componentValues}>
+          {(latest.component ?? []).map((component) => (
+            <div className={classes.componentValue} key={getConceptText(component.code)}>
+              <span className={classes.componentLabel}>{getConceptText(component.code)}</span>
+              <span className={classes.componentNumber}>
+                {component.valueQuantity?.value ?? component.valueInteger ?? component.valueString ?? '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className={classes.scoreValue}>{getObservationNumber(latest) ?? getObservationValue(latest)}</div>
+      )}
+      <LineChart chartData={chartData} showLegend={isMultiComponent} height={isMultiComponent ? 220 : 160} />
     </div>
   );
+}
+
+// A line chart with a single point renders as a dot, not a line. Duplicating that lone point gives it two
+// x positions to connect, so a single submission still reads as a flat trend line instead of just a dot.
+function padSinglePoint<T>(labels: string[], series: T[][]): { labels: string[]; series: T[][] } {
+  if (labels.length !== 1) {
+    return { labels, series };
+  }
+  return { labels: [labels[0], labels[0]], series: series.map((values) => [values[0], values[0]]) };
 }
 
 function buildTrendChartData(label: string, observations: Observation[]): ChartData<'line', number[], string> {
   // Search results are sorted newest-first; the trend graph reads left-to-right, oldest-first.
   const history = [...observations].reverse();
+  const rawLabels = history.map((observation) => formatDate(observation.effectiveDateTime ?? observation.issued));
+  const rawData = history.map((observation) => getObservationNumber(observation) ?? 0);
+  const { labels, series } = padSinglePoint(rawLabels, [rawData]);
   return {
-    labels: history.map((observation) => formatDate(observation.effectiveDateTime ?? observation.issued)),
+    labels,
     datasets: [
       {
         label,
-        data: history.map((observation) => getObservationNumber(observation) ?? 0),
+        data: series[0],
         backgroundColor: 'rgba(29, 112, 214, 0.7)',
         borderColor: 'rgba(29, 112, 214, 1)',
       },
@@ -369,9 +375,53 @@ function buildTrendChartData(label: string, observations: Observation[]): ChartD
   };
 }
 
+// For questionnaires like CTQ-SF that record several subscale scores as Observation.component[] instead of
+// a single top-level value — one overlapping trend line per subscale, detected structurally (has
+// components) rather than by matching a specific questionnaire name, so it also covers any other
+// multi-component questionnaire without extra code.
+const MULTI_SERIES_COLORS: { backgroundColor: string; borderColor: string }[] = [
+  { backgroundColor: 'rgba(29, 112, 214, 0.7)', borderColor: 'rgba(29, 112, 214, 1)' },
+  { backgroundColor: 'rgba(255, 119, 0, 0.7)', borderColor: 'rgba(255, 119, 0, 1)' },
+  { backgroundColor: 'rgba(47, 125, 74, 0.7)', borderColor: 'rgba(47, 125, 74, 1)' },
+  { backgroundColor: 'rgba(214, 29, 92, 0.7)', borderColor: 'rgba(214, 29, 92, 1)' },
+  { backgroundColor: 'rgba(124, 58, 237, 0.7)', borderColor: 'rgba(124, 58, 237, 1)' },
+  { backgroundColor: 'rgba(47, 125, 140, 0.7)', borderColor: 'rgba(47, 125, 140, 1)' },
+];
+
+function getComponentSeriesLabels(observations: Observation[]): string[] {
+  const labels = new Set<string>();
+  for (const observation of observations) {
+    for (const component of observation.component ?? []) {
+      labels.add(getConceptText(component.code));
+    }
+  }
+  return Array.from(labels);
+}
+
+function getComponentNumber(observation: Observation, label: string): number | undefined {
+  const component = observation.component?.find((c) => getConceptText(c.code) === label);
+  return component?.valueQuantity?.value ?? component?.valueInteger;
+}
+
+function buildMultiSeriesChartData(observations: Observation[]): ChartData<'line', number[], string> {
+  const history = [...observations].reverse();
+  const seriesLabels = getComponentSeriesLabels(observations);
+  const rawLabels = history.map((observation) => formatDate(observation.effectiveDateTime ?? observation.issued));
+  const rawSeries = seriesLabels.map((label) => history.map((observation) => getComponentNumber(observation, label) ?? 0));
+  const { labels, series } = padSinglePoint(rawLabels, rawSeries);
+  return {
+    labels,
+    datasets: seriesLabels.map((label, index) => ({
+      label,
+      data: series[index],
+      ...MULTI_SERIES_COLORS[index % MULTI_SERIES_COLORS.length],
+    })),
+  };
+}
+
 function getScoreObservations(observations: Observation[]): Observation[] {
   return observations
-    .filter((observation) => getObservationNumber(observation) !== undefined)
+    .filter((observation) => getObservationNumber(observation) !== undefined || (observation.component?.length ?? 0) > 0)
     .sort((a, b) => getDateMs(b) - getDateMs(a));
 }
 

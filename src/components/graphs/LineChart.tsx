@@ -7,6 +7,7 @@ import type { ComponentType, JSX } from 'react';
 function getLineChartOptions(showLegend: boolean): ChartOptions<'line'> {
   return {
     responsive: true,
+    maintainAspectRatio: false,
     scales: {
       y: {
         min: 0,
@@ -16,6 +17,12 @@ function getLineChartOptions(showLegend: boolean): ChartOptions<'line'> {
       legend: {
         display: showLegend,
         position: 'bottom' as const,
+        labels: {
+          boxWidth: 10,
+          boxHeight: 10,
+          padding: 8,
+          font: { size: 10 },
+        },
       },
     },
   };
@@ -25,6 +32,8 @@ interface LineChartProps {
   readonly chartData: ChartData<'line', number[], string>;
   /** Whether to show the dataset legend below the chart. Defaults to true. */
   readonly showLegend?: boolean;
+  /** Pixel height of the chart's container. Defaults to 160 — bump this up when a legend needs room. */
+  readonly height?: number;
 }
 
 const AsyncLine = lazy(async () => {
@@ -38,9 +47,9 @@ const AsyncLine = lazy(async () => {
   };
 });
 
-export function LineChart({ chartData, showLegend = true }: LineChartProps): JSX.Element {
+export function LineChart({ chartData, showLegend = true, height = 160 }: LineChartProps): JSX.Element {
   return (
-    <div style={{ margin: '1.25rem 0' }}>
+    <div style={{ margin: '1.25rem 0', height }}>
       <Suspense fallback={<div>Loading...</div>}>
         <AsyncLine options={getLineChartOptions(showLegend)} data={chartData} />
       </Suspense>

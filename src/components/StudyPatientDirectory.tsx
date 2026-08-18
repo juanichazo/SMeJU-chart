@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import { Badge, Group, Loader, TextInput } from '@mantine/core';
+import { Badge, Group, Loader, Select, TextInput } from '@mantine/core';
 import type { Observation, Patient } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react';
 import { IconArrowRight, IconSearch, IconUsers } from '@tabler/icons-react';
@@ -8,13 +8,26 @@ import { useEffect, useMemo, useState } from 'react';
 import type { JSX } from 'react';
 import { Link } from 'react-router';
 import { MEDPLUM_PROJECT_ID } from '../config';
+import type { DemographicInfo } from './demographics';
+import { countAnsweredQuestionnaires, getLatestDemographics } from './demographics';
 import classes from './StudyDashboard.module.css';
 
 interface PatientSummaryRow {
   patient: Patient;
   observationCount: number;
-  lastObservation?: string;
+  demographics?: DemographicInfo;
+  questionnairesAnswered: number;
 }
+
+type SortOption = 'latest' | 'name' | 'age' | 'career' | 'university';
+
+const sortOptions: { value: SortOption; label: string }[] = [
+  { value: 'latest', label: 'Latest data' },
+  { value: 'name', label: 'Name' },
+  { value: 'age', label: 'Age' },
+  { value: 'career', label: 'Career' },
+  { value: 'university', label: 'University' },
+];
 
 interface ProjectMeta {
   project?: string;
@@ -29,6 +42,7 @@ export function StudyPatientDirectory(): JSX.Element {
   const [rows, setRows] = useState<PatientSummaryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('latest');
 
   useEffect(() => {
     let alive = true;
@@ -39,11 +53,16 @@ export function StudyPatientDirectory(): JSX.Element {
         const patients = await searchProjectPatients();
         const summaries = await Promise.all(
           patients.map(async (patient) => {
-            const observations = await searchPatientObservations(patient.id as string);
+            const [observations, demographics, questionnairesAnswered] = await Promise.all([
+              searchPatientObservations(patient.id as string),
+              getLatestDemographics(medplum, patient.id as string),
+              countAnsweredQuestionnaires(medplum, patient.id as string),
+            ]);
             return {
               patient,
               observationCount: observations.length,
-              lastObservation: observations[0]?.effectiveDateTime ?? observations[0]?.issued,
+              demographics,
+              questionnairesAnswered,
             };
           })
         );
@@ -88,11 +107,17 @@ export function StudyPatientDirectory(): JSX.Element {
 
   const filteredRows = useMemo(() => {
     const query = searchText.trim().toLowerCase();
-    if (!query) {
-      return rows;
-    }
-    return rows.filter((row) => getPatientName(row.patient).toLowerCase().includes(query));
-  }, [rows, searchText]);
+    const matches = !query
+      ? rows
+      : rows.filter((row) => {
+          const haystack = [getPatientName(row.patient), row.demographics?.name, row.demographics?.career, row.demographics?.institution]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(query);
+        });
+    return sortRows(matches, sortBy);
+  }, [rows, searchText, sortBy]);
 
   const patientsWithData = rows.filter((row) => row.observationCount > 0).length;
   const totalObservations = rows.reduce((sum, row) => sum + row.observationCount, 0);
@@ -123,12 +148,22 @@ export function StudyPatientDirectory(): JSX.Element {
             <div className={classes.title}>Patients</div>
             <div className={classes.muted}>Only resources scoped to the configured Medplum project are listed.</div>
           </div>
-          <TextInput
-            leftSection={<IconSearch size={16} />}
-            placeholder="Search patients"
-            value={searchText}
-            onChange={(e) => setSearchText(e.currentTarget.value)}
-          />
+          <Group gap="sm">
+            <TextInput
+              leftSection={<IconSearch size={16} />}
+              placeholder="Search name, career, university"
+              value={searchText}
+              onChange={(e) => setSearchText(e.currentTarget.value)}
+            />
+            <Select
+              data={sortOptions.map((option) => ({ value: option.value, label: option.label }))}
+              value={sortBy}
+              onChange={(value) => setSortBy((value as SortOption) ?? 'latest')}
+              allowDeselect={false}
+              aria-label="Sort by"
+              w={160}
+            />
+          </Group>
         </div>
 
         {loading ? (
@@ -146,16 +181,28 @@ export function StudyPatientDirectory(): JSX.Element {
                   <div className={classes.muted}>{row.patient.id}</div>
                 </div>
                 <div>
-                  <div className={classes.muted}>Birth date</div>
-                  <div className={classes.metric}>{row.patient.birthDate ?? 'Unknown'}</div>
+                  <div className={classes.muted}>Age</div>
+                  <div className={classes.metric}>{row.demographics?.age ?? '—'}</div>
                 </div>
                 <div>
-                  <div className={classes.muted}>Gender</div>
-                  <div className={classes.metric}>{row.patient.gender ?? 'Unknown'}</div>
+                  <div className={classes.muted}>Career</div>
+                  <div className={classes.metric}>{row.demographics?.career ?? '—'}</div>
                 </div>
                 <div>
-                  <div className={classes.muted}>Latest data</div>
-                  <div className={classes.metric}>{formatDate(row.lastObservation)}</div>
+                  <div className={classes.muted}>University</div>
+                  <div className={classes.metric}>{row.demographics?.institution ?? '—'}</div>
+                </div>
+                <div>
+                  <div className={classes.muted}>Questionnaires</div>
+                  <div className={classes.metric}>{row.questionnairesAnswered}</div>
+                </div>
+                <div>
+                  <div className={classes.muted}>Avance en la carrera</div>
+                  <div className={classes.metric}>{row.demographics?.progressStage ?? '—'}</div>
+                </div>
+                <div>
+                  <div className={classes.muted}>Convivencia</div>
+                  <div className={classes.metric}>{row.demographics?.livingSituation ?? '—'}</div>
                 </div>
                 <Group justify="flex-end">
                   <IconArrowRight size={18} />
@@ -184,9 +231,41 @@ function getPatientName(patient: Patient): string {
   return parts.length > 0 ? parts.join(' ') : 'Unnamed patient';
 }
 
-function formatDate(value: string | undefined): string {
-  if (!value) {
-    return 'No data';
+function sortRows(rows: PatientSummaryRow[], sortBy: SortOption): PatientSummaryRow[] {
+  if (sortBy === 'latest') {
+    return rows;
   }
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
+  const sorted = [...rows];
+  sorted.sort((a, b) => {
+    switch (sortBy) {
+      case 'name':
+        return getPatientName(a.patient).localeCompare(getPatientName(b.patient));
+      case 'age':
+        return compareNullable(a.demographics?.age, b.demographics?.age);
+      case 'career':
+        return compareNullable(a.demographics?.career, b.demographics?.career);
+      case 'university':
+        return compareNullable(a.demographics?.institution, b.demographics?.institution);
+      default:
+        return 0;
+    }
+  });
+  return sorted;
+}
+
+// Sorts ascending; missing values always sort last regardless of direction.
+function compareNullable(a: string | number | undefined, b: string | number | undefined): number {
+  if (a === undefined && b === undefined) {
+    return 0;
+  }
+  if (a === undefined) {
+    return 1;
+  }
+  if (b === undefined) {
+    return -1;
+  }
+  if (typeof a === 'number' && typeof b === 'number') {
+    return a - b;
+  }
+  return String(a).localeCompare(String(b));
 }
