@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { getQuestionnaireAnswers } from '@medplum/core';
 import type { MedplumClient } from '@medplum/core';
+import type { Questionnaire, QuestionnaireResponseItemAnswer } from '@medplum/fhirtypes';
+import demographicsQuestionnaire from '../../Questionnaires/DatosSociodemograficosEstudiantes.json';
 import { TRACKED_QUESTIONNAIRE_URLS } from './trackedQuestionnaires';
 
 // From Questionnaires/DatosSociodemograficosEstudiantes.json's own `url` field. This questionnaire has no
@@ -44,6 +46,64 @@ export async function getLatestDemographics(medplum: MedplumClient, patientId: s
     livingSituation: answers['convivencia']?.valueCoding?.display,
     institutionType: answers['gestion-facultad']?.valueCoding?.display,
   };
+}
+
+export interface DemographicAnswer {
+  linkId: string;
+  question: string;
+  answer: string;
+}
+
+function formatAnswerValue(answer: QuestionnaireResponseItemAnswer | undefined): string | undefined {
+  if (!answer) {
+    return undefined;
+  }
+  if (answer.valueCoding) {
+    return answer.valueCoding.display ?? answer.valueCoding.code;
+  }
+  if (answer.valueString !== undefined) {
+    return answer.valueString;
+  }
+  if (answer.valueInteger !== undefined) {
+    return String(answer.valueInteger);
+  }
+  if (answer.valueDecimal !== undefined) {
+    return String(answer.valueDecimal);
+  }
+  if (answer.valueBoolean !== undefined) {
+    return answer.valueBoolean ? 'Sí' : 'No';
+  }
+  return undefined;
+}
+
+// Every question in the sociodemographic questionnaire, in questionnaire order, paired with the patient's
+// most recent submitted answer. Questions the patient skipped (e.g. conditional follow-ups like
+// "cantidad-mascotas" when they have no pets) are left out rather than shown as blank.
+export async function getSociodemographicAnswers(medplum: MedplumClient, patientId: string): Promise<DemographicAnswer[] | undefined> {
+  const [response] = await medplum.searchResources('QuestionnaireResponse', {
+    patient: `Patient/${patientId}`,
+    questionnaire: DEMOGRAPHICS_QUESTIONNAIRE_URL,
+    _sort: '-authored',
+    _count: 1,
+  });
+  if (!response) {
+    return undefined;
+  }
+
+  const answers = getQuestionnaireAnswers(response);
+  const items = (demographicsQuestionnaire as Questionnaire).item ?? [];
+  const result: DemographicAnswer[] = [];
+  for (const item of items) {
+    if (!item.linkId) {
+      continue;
+    }
+    const value = formatAnswerValue(answers[item.linkId]);
+    if (value === undefined) {
+      continue;
+    }
+    result.push({ linkId: item.linkId, question: item.text ?? item.linkId, answer: value });
+  }
+  return result;
 }
 
 // Counts distinct study questionnaires (from the tracked-questionnaire allowlist, so clinical encounter

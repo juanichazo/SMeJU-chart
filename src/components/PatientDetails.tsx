@@ -28,10 +28,10 @@ export function PatientDetails(props: PatientDetailsProps): JSX.Element {
   // questionnaire results. Encounters/Clinical Impressions/Observations (vitals) are hidden as unused;
   // kept here commented out (not deleted) in case a future study needs them back.
   const tabs = [
-    ['questionnaires', 'Questionnaires'],
-    ['details', 'Details'],
-    ['edit', 'Edit'],
-    ['history', 'History'],
+    ['questionnaires', 'Cuestionarios'],
+    ['details', 'Detalles'],
+    ['edit', 'Editar'],
+    ['history', 'Historial'],
     // ['encounter', 'Encounters'],
     // ['clinical', 'Clinical Impressions'],
     // ['observations', 'Observations'],
@@ -52,8 +52,8 @@ export function PatientDetails(props: PatientDetailsProps): JSX.Element {
         props.onChange(patient as Patient);
         showNotification({
           icon: <IconCircleCheck />,
-          title: 'Success',
-          message: 'Patient edited',
+          title: 'Éxito',
+          message: 'Paciente editado',
         });
         navigate(`/Patient/${id}/details`)?.catch(console.error);
         window.scrollTo(0, 0);

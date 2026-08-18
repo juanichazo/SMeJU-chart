@@ -4,10 +4,12 @@ import { Badge, Chip, Group, Loader, Stack } from '@mantine/core';
 import type { MedplumClient } from '@medplum/core';
 import type { CodeableConcept, Observation, Patient } from '@medplum/fhirtypes';
 import { ObservationTable, useMedplum } from '@medplum/react';
-import { IconActivity, IconClipboardData, IconFileAnalytics } from '@tabler/icons-react';
+import { IconActivity, IconClipboardData, IconFileAnalytics, IconUserSearch } from '@tabler/icons-react';
 import type { ChartData } from 'chart.js';
 import { useEffect, useMemo, useState } from 'react';
 import type { JSX } from 'react';
+import type { DemographicAnswer } from './demographics';
+import { getSociodemographicAnswers } from './demographics';
 import { LineChart } from './graphs/LineChart';
 import { localQuestionnairesByUrl } from './trackedQuestionnaires';
 import { MEDPLUM_PROJECT_ID } from '../config';
@@ -214,24 +216,26 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
   return (
     <Stack gap="md">
       <div className={classes.statGrid}>
-        <Metric label="Total observations" value={observations.length} />
-        <Metric label="Questionnaire groups" value={questionnaireCards.length} />
-        <Metric label="Score results" value={scoreObservations.length} />
-        <Metric label="Recent records" value={visibleObservations.slice(0, 12).length} />
+        <Metric label="Observaciones totales" value={observations.length} />
+        <Metric label="Cuestionarios agrupados" value={questionnaireCards.length} />
+        <Metric label="Resultados con puntaje" value={scoreObservations.length} />
+        <Metric label="Registros recientes" value={visibleObservations.slice(0, 12).length} />
       </div>
+
+      <SociodemographicPanel patient={props.patient} />
 
       <section className={classes.panel}>
         <div className={classes.toolbar}>
           <div>
-            <div className={classes.title}>Questionnaire scores</div>
-            <div className={classes.muted}>Latest submission per questionnaire, with score evolution over time.</div>
+            <div className={classes.title}>Puntajes de cuestionarios</div>
+            <div className={classes.muted}>Última respuesta de cada cuestionario, con la evolución del puntaje en el tiempo.</div>
           </div>
           <Badge leftSection={<IconActivity size={14} />} color="teal" variant="light">
             {getPatientName(props.patient)}
           </Badge>
         </div>
         {questionnaireCards.length === 0 ? (
-          <div className={classes.empty}>No questionnaire score observations found yet.</div>
+          <div className={classes.empty}>Todavía no hay observaciones de puntajes de cuestionarios.</div>
         ) : (
           <div className={classes.scoreGrid}>
             {questionnaireCards.map((group) => (
@@ -245,8 +249,8 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
         <div className={classes.panel}>
           <div className={classes.toolbar}>
             <div>
-              <div className={classes.title}>Questionnaires</div>
-              <div className={classes.muted}>Every questionnaire this patient has submitted, resolved via derivedFrom.</div>
+              <div className={classes.title}>Cuestionarios</div>
+              <div className={classes.muted}>Todos los cuestionarios que respondió este paciente, resueltos mediante derivedFrom.</div>
             </div>
             <IconClipboardData size={22} />
           </div>
@@ -257,7 +261,7 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
           <Chip.Group value={selectedQuestionnaire} onChange={(value) => setSelectedQuestionnaire(value as string)}>
             <Group gap={8} wrap="wrap">
               <Chip value="all" variant="light">
-                All
+                Todos
               </Chip>
               {questionnaireCards.map((g) => (
                 <Chip value={g.id} variant="light" key={g.id}>
@@ -271,7 +275,7 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
               <Group justify="space-between" key={group.id}>
                 <div>
                   <div className={classes.metric}>{group.title}</div>
-                  <div className={classes.muted}>{group.observations.length} matched observations</div>
+                  <div className={classes.muted}>{group.observations.length} observaciones asociadas</div>
                 </div>
                 <Badge variant="light" color="teal">
                   {group.observations.length}
@@ -284,13 +288,13 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
         <div className={classes.panel}>
           <div className={classes.toolbar}>
             <div>
-              <div className={classes.title}>Observation detail</div>
-              <div className={classes.muted}>Clean view of values, codes, and dates for practitioner review.</div>
+              <div className={classes.title}>Detalle de observaciones</div>
+              <div className={classes.muted}>Vista clara de valores, códigos y fechas para revisión del equipo de salud.</div>
             </div>
             <IconFileAnalytics size={22} />
           </div>
           {visibleObservations.length === 0 ? (
-            <div className={classes.empty}>No observations in this selection.</div>
+            <div className={classes.empty}>No hay observaciones en esta selección.</div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <ObservationTable value={visibleObservations.slice(0, 40)} />
@@ -299,6 +303,67 @@ export function StudyObservationDashboard(props: StudyObservationDashboardProps)
         </div>
       </section>
     </Stack>
+  );
+}
+
+// The sociodemographic questionnaire has no bot converting its answers into Observations, so it never
+// shows up as a score card below — it's the only questionnaire whose data has to be read straight from its
+// QuestionnaireResponse instead. Shown as its own panel so its answers are still visible somewhere.
+function SociodemographicPanel(props: { patient: Patient }): JSX.Element | null {
+  const medplum = useMedplum();
+  const [answers, setAnswers] = useState<DemographicAnswer[]>();
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    if (!props.patient.id) {
+      return;
+    }
+    setLoading(true);
+    getSociodemographicAnswers(medplum, props.patient.id)
+      .then((result) => {
+        if (alive) {
+          setAnswers(result);
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+        if (alive) {
+          setAnswers(undefined);
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [medplum, props.patient.id]);
+
+  if (loading || !answers || answers.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className={classes.panel}>
+      <div className={classes.toolbar}>
+        <div>
+          <div className={classes.title}>Datos sociodemográficos</div>
+          <div className={classes.muted}>Todas las respuestas del cuestionario sociodemográfico.</div>
+        </div>
+        <IconUserSearch size={22} />
+      </div>
+      <div className={classes.answerGrid}>
+        {answers.map((a) => (
+          <div className={classes.answerRow} key={a.linkId}>
+            <div className={classes.muted}>{a.question}</div>
+            <div className={classes.metric}>{a.answer}</div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -426,7 +491,7 @@ function getScoreObservations(observations: Observation[]): Observation[] {
 }
 
 function getConceptText(concept: CodeableConcept | undefined): string {
-  return concept?.text ?? concept?.coding?.find((coding) => coding.display)?.display ?? concept?.coding?.[0]?.code ?? 'Observation';
+  return concept?.text ?? concept?.coding?.find((coding) => coding.display)?.display ?? concept?.coding?.[0]?.code ?? 'Observación';
 }
 
 function getObservationValue(observation: Observation): string {
@@ -440,7 +505,7 @@ function getObservationValue(observation: Observation): string {
     return observation.valueString;
   }
   if (observation.valueBoolean !== undefined) {
-    return observation.valueBoolean ? 'Yes' : 'No';
+    return observation.valueBoolean ? 'Sí' : 'No';
   }
   if (observation.valueCodeableConcept) {
     return getConceptText(observation.valueCodeableConcept);
@@ -450,7 +515,7 @@ function getObservationValue(observation: Observation): string {
       .map((component) => `${getConceptText(component.code)}: ${component.valueQuantity?.value ?? component.valueString ?? ''}`)
       .join(', ');
   }
-  return 'No value';
+  return 'Sin valor';
 }
 
 function getObservationNumber(observation: Observation): number | undefined {
@@ -464,12 +529,12 @@ function getDateMs(observation: Observation): number {
 function getPatientName(patient: Patient): string {
   const name = patient.name?.[0];
   const parts = [...(name?.given ?? []), name?.family].filter(Boolean);
-  return parts.length > 0 ? parts.join(' ') : 'Unnamed patient';
+  return parts.length > 0 ? parts.join(' ') : 'Paciente sin nombre';
 }
 
 function formatDate(value: string | undefined): string {
   if (!value) {
-    return 'No date';
+    return 'Sin fecha';
   }
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
 }
@@ -479,6 +544,6 @@ function shortTitle(title: string): string {
     .replace('Alcohol Use Disorders Identification Test ', '')
     .replace('Childhood Trauma Questionnaire - Short Form ', '')
     .replace('Generalized Anxiety Disorder ', '')
-    .replace('Cuestionario de datos sociodemográficos', 'Sociodemographics')
+    .replace('Cuestionario de datos sociodemográficos', 'Datos sociodemográficos')
     .replace('Screening de Determinantes Sociales de la Salud (SDOH)', 'SDOH');
 }

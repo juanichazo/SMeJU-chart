@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 import { Group, Loader, Paper, Stack, Text } from '@mantine/core';
-import { calculateAgeString, capitalize, formatHumanName } from '@medplum/core';
+import { calculateAgeString, formatHumanName } from '@medplum/core';
 import type { Patient } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react';
 import { useEffect, useState } from 'react';
@@ -54,6 +54,19 @@ function PatientHeader(props: { patient: Patient; demographics?: DemographicInfo
   const age = props.patient.birthDate ? calculateAgeString(props.patient.birthDate) : undefined;
   const demographics = props.demographics;
 
+  function translateGender(gender: string): string {
+    switch (gender) {
+      case 'male':
+        return 'Masculino';
+      case 'female':
+        return 'Femenino';
+      case 'other':
+        return 'Otro';
+      default:
+        return 'Desconocido';
+    }
+  }
+
   return (
     <Paper withBorder p="md" radius={0} style={{ position: 'sticky', top: 0, zIndex: 10 }}>
       <Group justify="space-between" wrap="wrap" gap="md">
@@ -63,17 +76,17 @@ function PatientHeader(props: { patient: Patient; demographics?: DemographicInfo
         <Group gap="lg">
           <Group gap={6}>
             <Text c="dimmed" size="sm">
-              Birthdate:
+              Fecha de nacimiento:
             </Text>
             <Text size="sm">
-              {props.patient.birthDate ? `${props.patient.birthDate}${age ? ` (${age})` : ''}` : 'Unknown'}
+              {props.patient.birthDate ? `${props.patient.birthDate}${age ? ` (${age})` : ''}` : 'Desconocida'}
             </Text>
           </Group>
           <Group gap={6}>
             <Text c="dimmed" size="sm">
-              Gender:
+              Género:
             </Text>
-            <Text size="sm">{props.patient.gender ? capitalize(props.patient.gender) : 'Unknown'}</Text>
+            <Text size="sm">{props.patient.gender ? translateGender(props.patient.gender) : 'Desconocido'}</Text>
           </Group>
         </Group>
       </Group>
@@ -83,7 +96,7 @@ function PatientHeader(props: { patient: Patient; demographics?: DemographicInfo
           {demographics.age !== undefined && (
             <Group gap={6}>
               <Text c="dimmed" size="sm">
-                Self-reported age:
+                Edad autoinformada:
               </Text>
               <Text size="sm">{demographics.age}</Text>
             </Group>
@@ -91,7 +104,7 @@ function PatientHeader(props: { patient: Patient; demographics?: DemographicInfo
           {demographics.career && (
             <Group gap={6}>
               <Text c="dimmed" size="sm">
-                Career:
+                Carrera:
               </Text>
               <Text size="sm">{demographics.career}</Text>
             </Group>
@@ -99,7 +112,7 @@ function PatientHeader(props: { patient: Patient; demographics?: DemographicInfo
           {demographics.institution && (
             <Group gap={6}>
               <Text c="dimmed" size="sm">
-                University:
+                Universidad:
               </Text>
               <Text size="sm">{demographics.institution}</Text>
             </Group>

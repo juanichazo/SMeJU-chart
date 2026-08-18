@@ -22,11 +22,11 @@ interface PatientSummaryRow {
 type SortOption = 'latest' | 'name' | 'age' | 'career' | 'university';
 
 const sortOptions: { value: SortOption; label: string }[] = [
-  { value: 'latest', label: 'Latest data' },
-  { value: 'name', label: 'Name' },
-  { value: 'age', label: 'Age' },
-  { value: 'career', label: 'Career' },
-  { value: 'university', label: 'University' },
+  { value: 'latest', label: 'Más reciente' },
+  { value: 'name', label: 'Nombre' },
+  { value: 'age', label: 'Edad' },
+  { value: 'career', label: 'Carrera' },
+  { value: 'university', label: 'Universidad' },
 ];
 
 interface ProjectMeta {
@@ -126,32 +126,32 @@ export function StudyPatientDirectory(): JSX.Element {
     <div className={classes.shell}>
       <div className={classes.header}>
         <div>
-          <div className={classes.eyebrow}>Study monitoring</div>
-          <h1 className={classes.title}>Participant dashboard</h1>
-          <p className={classes.subtitle}>Project {MEDPLUM_PROJECT_ID}</p>
+          <div className={classes.eyebrow}>Seguimiento del estudio</div>
+          <h1 className={classes.title}>Panel de participantes</h1>
+          <p className={classes.subtitle}>Proyecto {MEDPLUM_PROJECT_ID}</p>
         </div>
         <Badge leftSection={<IconUsers size={14} />} variant="light" color="teal" size="lg">
-          Practitioner view
+          Vista del equipo de salud
         </Badge>
       </div>
 
       <div className={classes.statGrid}>
-        <Metric label="Project patients" value={rows.length} />
-        <Metric label="With observations" value={patientsWithData} />
-        <Metric label="Observation records" value={totalObservations} />
-        <Metric label="Questionnaires tracked" value={8} />
+        <Metric label="Pacientes del proyecto" value={rows.length} />
+        <Metric label="Con observaciones" value={patientsWithData} />
+        <Metric label="Registros de observaciones" value={totalObservations} />
+        <Metric label="Cuestionarios monitoreados" value={8} />
       </div>
 
       <section className={classes.panel}>
         <div className={classes.toolbar}>
           <div>
-            <div className={classes.title}>Patients</div>
-            <div className={classes.muted}>Only resources scoped to the configured Medplum project are listed.</div>
+            <div className={classes.title}>Pacientes</div>
+            <div className={classes.muted}>Solo se muestran los recursos del proyecto de Medplum configurado.</div>
           </div>
           <Group gap="sm">
             <TextInput
               leftSection={<IconSearch size={16} />}
-              placeholder="Search name, career, university"
+              placeholder="Buscar por nombre, carrera o universidad"
               value={searchText}
               onChange={(e) => setSearchText(e.currentTarget.value)}
             />
@@ -160,7 +160,7 @@ export function StudyPatientDirectory(): JSX.Element {
               value={sortBy}
               onChange={(value) => setSortBy((value as SortOption) ?? 'latest')}
               allowDeselect={false}
-              aria-label="Sort by"
+              aria-label="Ordenar por"
               w={160}
             />
           </Group>
@@ -171,7 +171,7 @@ export function StudyPatientDirectory(): JSX.Element {
             <Loader />
           </div>
         ) : filteredRows.length === 0 ? (
-          <div className={classes.empty}>No patients found for this project.</div>
+          <div className={classes.empty}>No se encontraron pacientes para este proyecto.</div>
         ) : (
           <div className={classes.patientList}>
             {filteredRows.map((row) => (
@@ -181,19 +181,19 @@ export function StudyPatientDirectory(): JSX.Element {
                   <div className={classes.muted}>{row.patient.id}</div>
                 </div>
                 <div>
-                  <div className={classes.muted}>Age</div>
+                  <div className={classes.muted}>Edad</div>
                   <div className={classes.metric}>{row.demographics?.age ?? '—'}</div>
                 </div>
                 <div>
-                  <div className={classes.muted}>Career</div>
+                  <div className={classes.muted}>Carrera</div>
                   <div className={classes.metric}>{row.demographics?.career ?? '—'}</div>
                 </div>
                 <div>
-                  <div className={classes.muted}>University</div>
+                  <div className={classes.muted}>Universidad</div>
                   <div className={classes.metric}>{row.demographics?.institution ?? '—'}</div>
                 </div>
                 <div>
-                  <div className={classes.muted}>Questionnaires</div>
+                  <div className={classes.muted}>Cuestionarios</div>
                   <div className={classes.metric}>{row.questionnairesAnswered}</div>
                 </div>
                 <div>
@@ -228,7 +228,7 @@ function Metric(props: { label: string; value: number }): JSX.Element {
 function getPatientName(patient: Patient): string {
   const name = patient.name?.[0];
   const parts = [...(name?.given ?? []), name?.family].filter(Boolean);
-  return parts.length > 0 ? parts.join(' ') : 'Unnamed patient';
+  return parts.length > 0 ? parts.join(' ') : 'Paciente sin nombre';
 }
 
 function sortRows(rows: PatientSummaryRow[], sortBy: SortOption): PatientSummaryRow[] {
